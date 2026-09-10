@@ -512,9 +512,21 @@
     });
   });
 
-  // Close modal, keep the form as-is
+  // Close modal and clear the form for the next order
   document.getElementById('modal-ok').addEventListener('click', () => {
     document.getElementById('confirm-modal').classList.remove('show');
+
+    // Reset all item quantities to 0
+    document.querySelectorAll('.menu-item .qty').forEach(q => q.textContent = '0');
+
+    // Clear customer info fields and remove any validation highlights
+    formInputs.forEach(input => {
+      input.value = '';
+      input.style.borderColor = '';
+    });
+
+    // Recalculate totals so everything shows a fresh, empty order
+    calculateTotal();
   });
 </script>
 
