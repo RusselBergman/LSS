@@ -395,6 +395,7 @@
     });
   });
 
+
   // Reset Item Counts button: only quantities, leave customer info alone
   document.getElementById('reset-btn').addEventListener('click', () => {
     document.querySelectorAll('.menu-item .qty').forEach(q => q.textContent = '0');
@@ -457,39 +458,17 @@
 
     const SHEET_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxBZqQx_VuBtf2jQI_uvM091TSEfxY2o0dBP92O5ASmQ4hPvh97fvVF5aPDYhqiWzbe/exec';
 
-    // Send to LSS inventory directly (no-cors: fire-and-forget, never blocks confirmation)
-    const lssItems = [];
-    document.querySelectorAll('.menu-item').forEach(item => {
-      const qty = parseInt(item.querySelector('.qty').textContent);
-      if (qty > 0) lssItems.push({
-        label: item.querySelector('strong').textContent,  // "(min N pcs)" stripped server-side
-        qty: qty,
-        note: ''
-      });
-    });
-    fetch('https://ugreen-nas.taila4f294.ts.net:8443/api/lss/orders/intake', {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        _token: 'dlP7xSJ0nmXxDOZiwxEUJMUonWJVwSA3',
-        order: {
-          sheet_row: 'web-' + Date.now(),
-          name: name, phone: phone, email: email,
-          placed_at: orderTime, pickup_at: '',
-          items: lssItems,
-          total: parseFloat(totalNum) || 0,
-          note: ''
-        }
-      })
-    }).catch(() => {});
-
     const payload = JSON.stringify({
       name, phone, email,
       items: itemsStr,
       total: totalNum,
       timestamp: orderTime
     });
+
+    // --- Show the confirmation immediately; all network work happens in the background (26 Nov) ---
+    document.getElementById('modal-details').textContent =
+      `Customer: ${name}\nPhone: ${phone}\nEmail: ${email}\n\n${document.getElementById('customer-summary').textContent}\n\nTotal: ${document.getElementById('order-total').textContent}`;
+    document.getElementById('confirm-modal').classList.add('show');
 
     // Send to the Google Sheet (no-cors keeps it simple; we optimistically assume success)
     fetch(SHEET_WEBAPP_URL, {
@@ -499,7 +478,14 @@
       body: payload
     }).catch(() => {});
 
-    // Send to FormSubmit, which emails the order to the shop (main + secondary)
+    // Send the order to the LSS system on the NAS via the HTTPS funnel (no-cors, fire-and-forget)
+    fetch('https://ugreen-nas.taila4f294.ts.net:8443/api/lss/orders', {
+      method: 'POST', mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: payload
+    }).catch(() => {});
+
+    // Send to FormSubmit, which emails the order to the shop (main + secondary) - background, not awaited
     const submitForm = (code) => fetch(`https://formsubmit.co/ajax/${code}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -513,18 +499,9 @@
         Order: itemsStr,
         Total: `MOP ${totalNum}`
       })
-    });
-
-    // Show the confirmation once the notification emails have been attempted (First hash is Russel, second hash is Hazel)
-    Promise.allSettled([submitForm('4feecbd86366b628f6d87a89713f8d20'), submitForm('f4552e214157d7779ad8a18ff6d54af9')])
-      .then(() => {
-        document.getElementById('modal-details').textContent =
-          `Customer: ${name}\nPhone: ${phone}\nEmail: ${email}\n\n${document.getElementById('customer-summary').textContent}\n\nTotal: ${document.getElementById('order-total').textContent}`;
-        document.getElementById('confirm-modal').classList.add('show');
-      })
-      .catch(() => {
-        alert("Sorry, we couldn't reach the order service. Please check your internet connection and try again.");
-      });
+    }).catch(() => {});
+    submitForm('4feecbd86366b628f6d87a89713f8d20');  // First hash is Russel
+    submitForm('f4552e214157d7779ad8a18ff6d54af9');  // Second hash is Hazel
   });
 
   // Close modal and clear the form for the next order
