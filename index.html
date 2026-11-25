@@ -458,6 +458,33 @@
 
     const SHEET_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxBZqQx_VuBtf2jQI_uvM091TSEfxY2o0dBP92O5ASmQ4hPvh97fvVF5aPDYhqiWzbe/exec';
 
+    // Send to LSS inventory directly (no-cors: fire-and-forget, never blocks confirmation)
+    const lssItems = [];
+    document.querySelectorAll('.menu-item').forEach(item => {
+      const qty = parseInt(item.querySelector('.qty').textContent);
+      if (qty > 0) lssItems.push({
+        label: item.querySelector('strong').textContent,  // "(min N pcs)" stripped server-side
+        qty: qty,
+        note: ''
+      });
+    });
+    fetch('https://ugreen-nas.taila4f294.ts.net:8443/api/lss/orders/intake', {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        _token: 'dlP7xSJ0nmXxDOZiwxEUJMUonWJVwSA3',
+        order: {
+          sheet_row: 'web-' + Date.now(),
+          name: name, phone: phone, email: email,
+          placed_at: orderTime, pickup_at: '',
+          items: lssItems,
+          total: parseFloat(totalNum) || 0,
+          note: ''
+        }
+      })
+    }).catch(() => {});
+
     const payload = JSON.stringify({
       name, phone, email,
       items: itemsStr,
