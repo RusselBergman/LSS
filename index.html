@@ -204,7 +204,8 @@
     }
     .modal .btn-ok { background-color: #28a745; color: white; }
     .modal .btn-ok:hover { background-color: #1e7e34; }
-  </style>
+    .menu-note { color: #666; font-style: italic; padding: 8px 4px; }
+</style>
 </head>
 <body>
 
@@ -222,108 +223,8 @@
 
   <h2>Our Menu</h2>
   
-<!-- Item 1 -->
-<div class="menu-item" data-price="63.00">
-  <div class="item-info">
-    <strong>Sourdough Boule Wholemeal with Seeds</strong>
-    <span>MOP 63.00</span>
-  </div>
-  <div class="quantity-selector">
-    <button class="btn minus">-</button>
-    <span class="qty">0</span>
-    <button class="btn plus">+</button>
-  </div>
-</div>
-
-<!-- Item 2 -->
-<div class="menu-item" data-price="48.00">
-  <div class="item-info">
-    <strong>Sourdough Boule White</strong>
-    <span>MOP 48.00</span>
-  </div>
-  <div class="quantity-selector">
-    <button class="btn minus">-</button>
-    <span class="qty">0</span>
-    <button class="btn plus">+</button>
-  </div>
-</div>
-
-<!-- Item 3 -->
-<div class="menu-item" data-price="7.00" data-min="6">
-  <div class="item-info">
-    <strong>Mini Burger Buns (min 6 pcs)</strong>
-    <span>MOP 7.00</span>
-  </div>
-  <div class="quantity-selector">
-    <button class="btn minus">-</button>
-    <span class="qty">0</span>
-    <button class="btn plus">+</button>
-  </div>
-</div>
-
-<!-- Item 4 -->
-<div class="menu-item" data-price="4.00" data-min="6">
-  <div class="item-info">
-    <strong>Pandesal (min 6 pcs)</strong>
-    <span>MOP 4.00</span>
-  </div>
-  <div class="quantity-selector">
-    <button class="btn minus">-</button>
-    <span class="qty">0</span>
-    <button class="btn plus">+</button>
-  </div>
-</div>
-
-<!-- Item 5 -->
-<div class="menu-item" data-price="15.00" data-min="4">
-  <div class="item-info">
-    <strong>Cinnamon Buns (min 4 pcs)</strong>
-    <span>MOP 15.00</span>
-  </div>
-  <div class="quantity-selector">
-    <button class="btn minus">-</button>
-    <span class="qty">0</span>
-    <button class="btn plus">+</button>
-  </div>
-</div>
-
-<!-- Item 6 -->
-<div class="menu-item" data-price="15.00" data-min="4">
-  <div class="item-info">
-    <strong>Nutella Buns (min 4 pcs)</strong>
-    <span>MOP 15.00</span>
-  </div>
-  <div class="quantity-selector">
-    <button class="btn minus">-</button>
-    <span class="qty">0</span>
-    <button class="btn plus">+</button>
-  </div>
-</div>
-
-<!-- Item 7 -->
-<div class="menu-item" data-price="35.00">
-  <div class="item-info">
-    <strong>Sourdough Crackers (Salted)</strong>
-    <span>MOP 35.00</span>
-  </div>
-  <div class="quantity-selector">
-    <button class="btn minus">-</button>
-    <span class="qty">0</span>
-    <button class="btn plus">+</button>
-  </div>
-</div>
-
-<!-- Item 8 -->
-<div class="menu-item" data-price="35.00">
-  <div class="item-info">
-    <strong>Sourdough Crackers (Unsalted)</strong>
-    <span>MOP 35.00</span>
-  </div>
-  <div class="quantity-selector">
-    <button class="btn minus">-</button>
-    <span class="qty">0</span>
-    <button class="btn plus">+</button>
-  </div>
+<div id="menu-list">
+  <p id="menu-status" class="menu-note">Loading the menu&hellip;</p>
 </div>
 
   <!-- Total -->
@@ -349,31 +250,94 @@
 </div>
 
 <script>
-  document.querySelectorAll('.menu-item').forEach(item => {
-    const minusBtn = item.querySelector('.minus');
-    const plusBtn = item.querySelector('.plus');
-    const qtyDisplay = item.querySelector('.qty');
+  // --- Menu: rendered from the LSS catalogue, keyed by SKU code -----------
+  // 27 Nov SKU switch: the page no longer bakes in names or prices. It loads
+  // GET /api/lss/menu (items: code, name, price cents, min_qty), renders the
+  // menu from it, and the cart sends {code, qty} to the intake. The last good
+  // catalogue is cached in localStorage so a brief NAS outage still shows the
+  // menu (clearly flagged as cached); with no cache at all we say so.
+  const MENU_URL = 'https://ugreen-nas.taila4f294.ts.net:8443/api/lss/menu';
+  const MENU_CACHE_KEY = 'lss-menu-v1';
 
-    const minQty = parseInt(item.getAttribute('data-min')) || 1;
+  const money = cents => 'MOP ' + (cents / 100).toFixed(2);
 
-    minusBtn.addEventListener('click', () => {
-      let qty = parseInt(qtyDisplay.textContent);
-      if (qty > 0) {
-        // Drop straight to 0 if going below the minimum, otherwise decrement
-        qty = (qty <= minQty) ? 0 : qty - 1;
+  function renderMenu(items, fromCache) {
+    const list = document.getElementById('menu-list');
+    list.innerHTML = '';
+    if (fromCache) {
+      const note = document.createElement('p');
+      note.className = 'menu-note';
+      note.textContent = '(Showing the saved menu - prices could be out of date.)';
+      list.appendChild(note);
+    }
+    items.forEach(it => {
+      const row = document.createElement('div');
+      row.className = 'menu-item';
+      row.setAttribute('data-code', it.code);
+      row.setAttribute('data-price', (it.price / 100).toFixed(2));
+      if (it.min_qty > 0) row.setAttribute('data-min', it.min_qty);
+      const label = it.min_qty > 0 ? `${it.name} (min ${it.min_qty} pcs)` : it.name;
+      row.innerHTML =
+        `<div class="item-info"><strong>${label}</strong><span>${money(it.price)}</span></div>` +
+        '<div class="quantity-selector"><button class="btn minus">-</button>' +
+        '<span class="qty">0</span><button class="btn plus">+</button></div>';
+      list.appendChild(row);
+    });
+    wireMenu();
+    calculateTotal();
+    const st = document.getElementById('menu-status');
+    if (st) st.remove();
+  }
+
+  function wireMenu() {
+    document.querySelectorAll('.menu-item').forEach(item => {
+      const minusBtn = item.querySelector('.minus');
+      const plusBtn = item.querySelector('.plus');
+      const qtyDisplay = item.querySelector('.qty');
+      const minQty = parseInt(item.getAttribute('data-min')) || 1;
+
+      minusBtn.addEventListener('click', () => {
+        let qty = parseInt(qtyDisplay.textContent);
+        if (qty > 0) {
+          // Drop straight to 0 if going below the minimum, otherwise decrement
+          qty = (qty <= minQty) ? 0 : qty - 1;
+          qtyDisplay.textContent = qty;
+          calculateTotal();
+        }
+      });
+
+      plusBtn.addEventListener('click', () => {
+        let qty = parseInt(qtyDisplay.textContent);
+        // Jump straight to the minimum when starting from 0
+        qty = (qty === 0) ? minQty : qty + 1;
         qtyDisplay.textContent = qty;
         calculateTotal();
-      }
+      });
     });
+  }
 
-    plusBtn.addEventListener('click', () => {
-      let qty = parseInt(qtyDisplay.textContent);
-      // Jump straight to the minimum when starting from 0
-      qty = (qty === 0) ? minQty : qty + 1;
-      qtyDisplay.textContent = qty;
-      calculateTotal();
-    });
-  });
+  function loadMenu() {
+    fetch(MENU_URL)
+      .then(r => {
+        if (!r.ok) throw new Error('menu ' + r.status);
+        return r.json();
+      })
+      .then(d => {
+        if (!d.ok || !Array.isArray(d.items) || d.items.length === 0) throw new Error('empty menu');
+        try { localStorage.setItem(MENU_CACHE_KEY, JSON.stringify(d.items)); } catch (e) {}
+        renderMenu(d.items, false);
+      })
+      .catch(() => {
+        try {
+          const cached = JSON.parse(localStorage.getItem(MENU_CACHE_KEY) || 'null');
+          if (cached && cached.length) { renderMenu(cached, true); return; }
+        } catch (e) {}
+        document.getElementById('menu-list').innerHTML =
+          '<p class="menu-note">The menu could not be loaded right now.' +
+          ' Please refresh the page, or phone the shop to place your order.</p>';
+      });
+  }
+  loadMenu();
 
   function calculateTotal() {
     let total = 0;
@@ -409,6 +373,7 @@
       }
     });
   });
+
 
   // Reset Item Counts button: only quantities, leave customer info alone
   document.getElementById('reset-btn').addEventListener('click', () => {
@@ -466,7 +431,8 @@
       if (qty > 0) {
         const label = item.querySelector('strong').textContent;
         itemLines.push(`${qty} × ${label}`);
-        lssItems.push({ label: label, qty: qty });
+        // SKU switch: the intake matches on code only; the label is display text.
+        lssItems.push({ code: item.getAttribute('data-code'), qty: qty, label: label });
       }
     });
     const itemsStr = itemLines.join('\n');
@@ -567,7 +533,7 @@
         submitForm('f4552e214157d7779ad8a18ff6d54af9', tag);  // Hazel
         statusEl.className = 'modal-status fail';
         statusEl.innerHTML = 'We could not confirm your order reached us. ' +
-          '<br>We have emailed it to the shop instead \u2014 please also message us to be sure.' +
+          '<br>We have emailed it to the shop instead \u2014 please also call us to be sure.' +
           '<br><small>(regarding: ' + (err && err.message ? err.message : 'network error') + ')</small>';
         okBtn.textContent = 'Try again';
         okBtn.disabled = false;
