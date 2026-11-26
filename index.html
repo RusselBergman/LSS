@@ -492,6 +492,9 @@
 
     let attempt = 0;  // 1 = first send; 2+ = a retry. Repeats are flagged in
                       // the shop email subject so the shop isn't confused.
+    let emailed = false;  // 27 Nov: the shop email is the NOTIFICATION channel
+                          // (Hazel reads it), not just a failure fallback — it
+                          // fires on success too, exactly once per order.
     const sendToLss = async () => {
       attempt++;
       statusEl.className = 'modal-status pending';
@@ -519,6 +522,11 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) throw new Error(data.error || ('server said ' + res.status));
 
+        if (!emailed) {
+          emailed = true;
+          submitForm('4feecbd86366b628f6d87a89713f8d20');  // Russel
+          submitForm('f4552e214157d7779ad8a18ff6d54af9');  // Hazel
+        }
         statusEl.className = 'modal-status ok';
         statusEl.textContent = data.replay
           ? 'Order received \u2713 (already recorded)'
@@ -526,11 +534,14 @@
         okBtn.textContent = 'Done';
         okBtn.disabled = false;
       } catch (err) {
-        // Still tell the shop by email, so the order cannot vanish.
-        // A retry re-emails, flagged in the subject so repeats are obvious.
+        // Tell the shop by email whatever happens — it is the notification
+        // channel. A retry adds a REPEAT flag so repeats are obvious.
         const tag = attempt > 1 ? ` - REPEAT (attempt ${attempt}, not a second order)` : '';
-        submitForm('4feecbd86366b628f6d87a89713f8d20', tag);  // Russel
-        submitForm('f4552e214157d7779ad8a18ff6d54af9', tag);  // Hazel
+        if (!emailed) {
+          emailed = true;
+          submitForm('4feecbd86366b628f6d87a89713f8d20', tag);  // Russel
+          submitForm('f4552e214157d7779ad8a18ff6d54af9', tag);  // Hazel
+        }
         statusEl.className = 'modal-status fail';
         statusEl.innerHTML = 'We could not confirm your order reached us. ' +
           '<br>We have emailed it to the shop instead \u2014 please also call us to be sure.' +
