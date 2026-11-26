@@ -180,6 +180,20 @@
       font-weight: bold;
       font-size: 1.1rem;
     }
+    .modal .modal-status {
+      font-size: 0.95rem;
+      text-align: left;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 16px;
+      font-weight: 600;
+      line-height: 1.45;
+    }
+    .modal .modal-status.pending { background: #eef4ff; color: #1d4f91; }
+    .modal .modal-status.ok      { background: #e8f7ec; color: #1e7b34; }
+    .modal .modal-status.fail    { background: #fdecec; color: #a12525; }
+    .modal .modal-status a       { color: #a12525; }
+    .modal button:disabled { opacity: 0.55; cursor: default; }
     .modal button {
       margin: 5px;
       padding: 10px 20px;
@@ -327,9 +341,10 @@
 <div class="modal-overlay" id="confirm-modal">
   <div class="modal">
     <div class="modal-icon">🎉</div>
-    <h3>Order Placed!</h3>
+    <h3>Thanks &mdash; here is your order</h3>
+    <div class="modal-status pending" id="modal-status">Sending your order&hellip;</div>
     <div class="modal-details" id="modal-details"></div>
-    <button class="btn-ok" id="modal-ok">Done</button>
+    <button class="btn-ok" id="modal-ok" disabled>Sending&hellip;</button>
   </div>
 </div>
 
@@ -469,43 +484,36 @@
       timestamp: orderTime
     });
 
-    // --- Show the confirmation immediately; all network work happens in the background (26 Nov) ---
+    // --- Show the order immediately, then report the REAL outcome ----------
+    // 26 Nov: no more silent fire-and-forget. The customer sees "sending",
+    // then either a confirmed order number or a clear failure with a retry.
     document.getElementById('modal-details').textContent =
       `Customer: ${name}\nPhone: ${phone}\nEmail: ${email}\n\n${document.getElementById('customer-summary').textContent}\n\nTotal: ${document.getElementById('order-total').textContent}`;
     document.getElementById('confirm-modal').classList.add('show');
 
-    // Send to the Google Sheet (no-cors keeps it simple; we optimistically assume success)
+    const statusEl = document.getElementById('modal-status');
+    const okBtn = document.getElementById('modal-ok');
+    const INTAKE_URL = 'https://ugreen-nas.taila4f294.ts.net:8443/api/lss/orders/intake';
+
+    // One key per order: a retry re-sends the SAME key, so the intake ignores
+    // it as a replay instead of creating a second order.
+    const sheetRow = 'web-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+
+    // The Google Sheet row is the shop's own paper trail; it runs in the
+    // background and is never presented to the customer as the confirmation.
     fetch(SHEET_WEBAPP_URL, {
-      method: 'POST',
-      mode: 'no-cors',
+      method: 'POST', mode: 'no-cors',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: payload
     }).catch(() => {});
 
-    // Send the order to the LSS intake on the NAS via the HTTPS funnel.
-    // /orders/intake contract: {_token, order:{sheet_row, name, phone, email,
-    // items:[{label,qty}], total, placed_at}}; idempotent on sheet_row.
-    fetch('https://ugreen-nas.taila4f294.ts.net:8443/api/lss/orders/intake', {
-      method: 'POST', mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        _token: 'dlP7xSJ0nmXxDOZiwxEUJMUonWJVwSA3',
-        order: {
-          sheet_row: 'web-' + Date.now(),
-          name: name, phone: phone, email: email,
-          items: lssItems,
-          total: Math.round(parseFloat(totalNum) || 0),
-          placed_at: orderTime
-        }
-      })
-    }).catch(() => {});
-
-    // Send to FormSubmit, which emails the order to the shop (main + secondary) - background, not awaited
-    const submitForm = (code) => fetch(`https://formsubmit.co/ajax/${code}`, {
+    // Shop emails (Russel + Hazel) are the fallback channel: if the intake is
+    // down these still reach the shop, so the order is never lost.
+    const submitForm = (code, tag = '') => fetch(`https://formsubmit.co/ajax/${code}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify({
-        _subject: `New Order - Love Sweety Spice (${name})`,
+        _subject: `New Order - Love Sweety Spice (${name})${tag}`,
         _template: 'table',
         Timestamp: orderTime,
         Customer: name,
@@ -515,12 +523,74 @@
         Total: `MOP ${totalNum}`
       })
     }).catch(() => {});
-    submitForm('4feecbd86366b628f6d87a89713f8d20');  // First hash is Russel
-    submitForm('f4552e214157d7779ad8a18ff6d54af9');  // Second hash is Hazel
+
+    let attempt = 0;  // 1 = first send; 2+ = a retry. Repeats are flagged in
+                      // the shop email subject so the shop isn't confused.
+    const sendToLss = async () => {
+      attempt++;
+      statusEl.className = 'modal-status pending';
+      statusEl.textContent = 'Sending your order\u2026';
+      okBtn.disabled = true;
+      okBtn.textContent = 'Sending\u2026';
+
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 20000);
+      try {
+        const res = await fetch(INTAKE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            order: {
+              sheet_row: sheetRow,
+              name: name, phone: phone, email: email,
+              items: lssItems,
+              total: Math.round(parseFloat(totalNum) || 0),
+              placed_at: orderTime
+            }
+          }),
+          signal: ctrl.signal
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) throw new Error(data.error || ('server said ' + res.status));
+
+        statusEl.className = 'modal-status ok';
+        statusEl.textContent = data.replay
+          ? 'Order received \u2713 (already recorded)'
+          : `Order received \u2713  Reference #${data.order_id || data.id || 'recorded'}`;
+        okBtn.textContent = 'Done';
+        okBtn.disabled = false;
+      } catch (err) {
+        // Still tell the shop by email, so the order cannot vanish.
+        // A retry re-emails, flagged in the subject so repeats are obvious.
+        const tag = attempt > 1 ? ` - REPEAT (attempt ${attempt}, not a second order)` : '';
+        submitForm('4feecbd86366b628f6d87a89713f8d20', tag);  // Russel
+        submitForm('f4552e214157d7779ad8a18ff6d54af9', tag);  // Hazel
+        statusEl.className = 'modal-status fail';
+        statusEl.innerHTML = 'We could not confirm your order reached us. ' +
+          '<br>We have emailed it to the shop instead \u2014 please also message us to be sure.' +
+          '<br><small>(regarding: ' + (err && err.message ? err.message : 'network error') + ')</small>';
+        okBtn.textContent = 'Try again';
+        okBtn.disabled = false;
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    okBtn.onclick = () => {
+      if (okBtn.textContent === 'Try again') { sendToLss(); return; }
+      document.getElementById('confirm-modal').classList.remove('show');
+    };
+
+    sendToLss();
   });
 
-  // Close modal and clear the form for the next order
+  // Close modal and clear the form for the next order.
+  // Only acts on "Done": while the order is sending, or on "Try again", it
+  // must not wipe the customer's basket.
   document.getElementById('modal-ok').addEventListener('click', () => {
+    const btn = document.getElementById('modal-ok');
+    const shown = document.getElementById('confirm-modal').classList.contains('show');
+    if (!shown || btn.textContent.trim() !== 'Done') return;
     document.getElementById('confirm-modal').classList.remove('show');
 
     // Reset all item quantities to 0
