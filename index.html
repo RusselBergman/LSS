@@ -395,7 +395,6 @@
     });
   });
 
-
   // Reset Item Counts button: only quantities, leave customer info alone
   document.getElementById('reset-btn').addEventListener('click', () => {
     document.querySelectorAll('.menu-item .qty').forEach(q => q.textContent = '0');
@@ -444,11 +443,16 @@
     const phone = document.getElementById('customer-phone').value.trim();
     const email = document.getElementById('customer-email').value.trim();
 
-    // Build the items list as plain lines for the sheet/email
+    // Build the items list as plain lines for the sheet/email, plus structured items for LSS
     const itemLines = [];
+    const lssItems = [];
     document.querySelectorAll('.menu-item').forEach(item => {
       const qty = parseInt(item.querySelector('.qty').textContent);
-      if (qty > 0) itemLines.push(`${qty} × ${item.querySelector('strong').textContent}`);
+      if (qty > 0) {
+        const label = item.querySelector('strong').textContent;
+        itemLines.push(`${qty} × ${label}`);
+        lssItems.push({ label: label, qty: qty });
+      }
     });
     const itemsStr = itemLines.join('\n');
 
@@ -478,11 +482,22 @@
       body: payload
     }).catch(() => {});
 
-    // Send the order to the LSS system on the NAS via the HTTPS funnel (no-cors, fire-and-forget)
-    fetch('https://ugreen-nas.taila4f294.ts.net:8443/api/lss/orders', {
+    // Send the order to the LSS intake on the NAS via the HTTPS funnel.
+    // /orders/intake contract: {_token, order:{sheet_row, name, phone, email,
+    // items:[{label,qty}], total, placed_at}}; idempotent on sheet_row.
+    fetch('https://ugreen-nas.taila4f294.ts.net:8443/api/lss/orders/intake', {
       method: 'POST', mode: 'no-cors',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: payload
+      body: JSON.stringify({
+        _token: 'dlP7xSJ0nmXxDOZiwxEUJMUonWJVwSA3',
+        order: {
+          sheet_row: 'web-' + Date.now(),
+          name: name, phone: phone, email: email,
+          items: lssItems,
+          total: Math.round(parseFloat(totalNum) || 0),
+          placed_at: orderTime
+        }
+      })
     }).catch(() => {});
 
     // Send to FormSubmit, which emails the order to the shop (main + secondary) - background, not awaited
